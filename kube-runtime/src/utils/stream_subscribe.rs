@@ -30,10 +30,13 @@ where
 {
     #[pin]
     stream: S,
-    sender: broadcast::Sender<Option<Arc<S::Item>>>,
+    sender: broadcast::Sender<Option<S::Item>>,
 }
 
-impl<S: Stream> StreamSubscribe<S> {
+impl<S> StreamSubscribe<S>
+where
+    S: Stream,
+{
     pub fn new(stream: S) -> Self {
         let (sender, _) = broadcast::channel(CHANNEL_CAPACITY);
 
@@ -42,7 +45,7 @@ impl<S: Stream> StreamSubscribe<S> {
 
     /// Subscribe to events from this stream
     #[must_use = "streams do nothing unless polled"]
-    pub fn subscribe(&self) -> impl Stream<Item = Result<Arc<S::Item>, Error>> {
+    pub fn subscribe(&self) -> impl Stream<Item = Result<S::Item, Error>> {
         stream::unfold(self.sender.subscribe(), |mut rx| async {
             match rx.recv().await {
                 Ok(Some(obj)) => Some((Ok(obj), rx)),
@@ -53,8 +56,11 @@ impl<S: Stream> StreamSubscribe<S> {
     }
 }
 
-impl<S: Stream> Stream for StreamSubscribe<S> {
-    type Item = Arc<S::Item>;
+impl<S, K, E> Stream for StreamSubscribe<S>
+where
+    S: Stream<Item = Result<Arc<K>, E>>,
+{
+    type Item = S::Item;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -64,7 +70,6 @@ impl<S: Stream> Stream for StreamSubscribe<S> {
             Poll::Ready(Some(item)) => {
                 // `arc_with_non_send_sync` false positive: https://github.com/rust-lang/rust-clippy/issues/11076
                 #[allow(clippy::arc_with_non_send_sync)]
-                let item = Arc::new(item);
                 this.sender.send(Some(item.clone())).ok();
                 Poll::Ready(Some(item))
             }

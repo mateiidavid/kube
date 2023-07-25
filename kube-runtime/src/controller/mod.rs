@@ -123,7 +123,7 @@ where
 }
 
 /// Enqueues any mapper returned `K` types for reconciliation
-fn trigger_others<T, S, K, I>(
+fn trigger_others<S, T, K, I>(
     stream: S,
     mapper: impl Fn(Arc<T>) -> I + Sync + Send + 'static,
     dyntype: T::DynamicType,
@@ -154,19 +154,19 @@ where
 }
 
 /// Enqueues any owners of type `KOwner` for reconciliation
-pub fn trigger_owners<KOwner, S, T>(
+pub fn trigger_owners<KOwner, S, K>(
     stream: S,
     owner_type: KOwner::DynamicType,
-    child_type: T::DynamicType,
+    child_type: K::DynamicType,
 ) -> impl Stream<Item = Result<ReconcileRequest<KOwner>, S::Error>>
 where
-    S: TryStream<Ok = Arc<T>>,
-    T: Resource,
-    T::DynamicType: Clone,
+    S: TryStream<Ok = Arc<K>>,
+    K: Resource,
+    K::DynamicType: Clone,
     KOwner: Resource,
     KOwner::DynamicType: Clone,
 {
-    let mapper = move |obj: Arc<T>| {
+    let mapper = move |obj: Arc<K>| {
         let meta = obj.meta().clone();
         let ns = meta.namespace;
         let owner_type = owner_type.clone();
@@ -680,9 +680,7 @@ where
     ///
     /// [`OwnerReference`]: k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference
     #[must_use]
-    pub fn owns<
-        Child: Clone + Resource<DynamicType = ()> + DeserializeOwned + Debug + Send + 'static + Sync,
-    >(
+    pub fn owns<Child: Clone + Resource<DynamicType = ()> + DeserializeOwned + Debug + Send + 'static>(
         self,
         api: Api<Child>,
         wc: Config,
@@ -694,7 +692,7 @@ where
     ///
     /// Same as [`Controller::owns`], but accepts a `DynamicType` so it can be used with dynamic resources.
     #[must_use]
-    pub fn owns_with<Child: Clone + Resource + DeserializeOwned + Debug + Send + 'static + Sync>(
+    pub fn owns_with<Child: Clone + Resource + DeserializeOwned + Debug + Send + 'static>(
         mut self,
         api: Api<Child>,
         dyntype: Child::DynamicType,
@@ -853,7 +851,7 @@ where
         mapper: impl Fn(Arc<Other>) -> I + Sync + Send + 'static,
     ) -> Self
     where
-        Other: Clone + Resource + DeserializeOwned + Debug + Send + 'static + Sync,
+        Other: Clone + Resource + DeserializeOwned + Debug + Send + 'static,
         Other::DynamicType: Default + Debug + Clone + Eq + Hash,
         I: 'static + IntoIterator<Item = ObjectRef<K>>,
         I::IntoIter: Send,
@@ -873,7 +871,7 @@ where
         mapper: impl Fn(Arc<Other>) -> I + Sync + Send + 'static,
     ) -> Self
     where
-        Other: Clone + Resource + DeserializeOwned + Debug + Send + 'static + Sync,
+        Other: Clone + Resource + DeserializeOwned + Debug + Send + 'static,
         I: 'static + IntoIterator<Item = ObjectRef<K>>,
         I::IntoIter: Send,
         Other::DynamicType: Debug + Clone + Eq + Hash,

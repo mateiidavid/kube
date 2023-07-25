@@ -93,7 +93,7 @@ pub fn reflector<K, W>(mut writer: store::Writer<K>, stream: W) -> impl Stream<I
 where
     K: Resource + Clone,
     K::DynamicType: Eq + Hash + Clone,
-    W: Stream<Item = watcher::Result<watcher::Event<Arc<K>>>>,
+    W: Stream<Item = watcher::Result<Arc<watcher::Event<K>>>>,
 {
     stream.inspect_ok(move |event| writer.apply_watcher_event(event))
 }

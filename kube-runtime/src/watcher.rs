@@ -405,7 +405,7 @@ async fn step_trampolined<A>(
     api: &A,
     wc: &Config,
     state: State<A::Value>,
-) -> (Option<Result<Event<Arc<A::Value>>>>, State<A::Value>)
+) -> (Option<Result<Arc<Event<A::Value>>>>, State<A::Value>)
 where
     A: ApiMode,
     A::Value: Resource + 'static,
@@ -428,10 +428,9 @@ where
                     } else if let Some(resource_version) =
                         list.metadata.resource_version.filter(|s| !s.is_empty())
                     {
-                        (
-                            Some(Ok(Event::Restarted(objects.into_iter().map(Arc::new).collect()))),
-                            State::InitListed { resource_version },
-                        )
+                        (Some(Ok(Arc::new(Event::Restarted(objects)))), State::InitListed {
+                            resource_version,
+                        })
                     } else {
                         (Some(Err(Error::NoResourceVersion)), State::default())
                     }
@@ -474,7 +473,7 @@ where
                 if resource_version.is_empty() {
                     (Some(Err(Error::NoResourceVersion)), State::default())
                 } else {
-                    (Some(Ok(Event::Applied(Arc::new(obj)))), State::Watching {
+                    (Some(Ok(Arc::new(Event::Applied(obj)))), State::Watching {
                         resource_version,
                         stream,
                     })
@@ -485,7 +484,7 @@ where
                 if resource_version.is_empty() {
                     (Some(Err(Error::NoResourceVersion)), State::default())
                 } else {
-                    (Some(Ok(Event::Deleted(Arc::new(obj)))), State::Watching {
+                    (Some(Ok(Arc::new(Event::Deleted(obj)))), State::Watching {
                         resource_version,
                         stream,
                     })
@@ -533,7 +532,7 @@ async fn step<A>(
     api: &A,
     config: &Config,
     mut state: State<A::Value>,
-) -> (Result<Event<Arc<A::Value>>>, State<A::Value>)
+) -> (Result<Arc<Event<A::Value>>>, State<A::Value>)
 where
     A: ApiMode,
     A::Value: Resource + 'static,
@@ -598,7 +597,7 @@ where
 pub fn watcher<K: Resource + Clone + DeserializeOwned + Debug + Send + 'static>(
     api: Api<K>,
     watcher_config: Config,
-) -> impl Stream<Item = Result<Event<Arc<K>>>> + Send {
+) -> impl Stream<Item = Result<Arc<Event<K>>>> + Send {
     futures::stream::unfold(
         (api, watcher_config, State::default()),
         |(api, watcher_config, state)| async {
@@ -662,7 +661,7 @@ pub fn watcher<K: Resource + Clone + DeserializeOwned + Debug + Send + 'static>(
 pub fn metadata_watcher<K: Resource + Clone + DeserializeOwned + Debug + Send + 'static>(
     api: Api<K>,
     watcher_config: Config,
-) -> impl Stream<Item = Result<Event<Arc<PartialObjectMeta<K>>>>> + Send {
+) -> impl Stream<Item = Result<Arc<Event<PartialObjectMeta<K>>>>> + Send {
     futures::stream::unfold(
         (api, watcher_config, State::default()),
         |(api, watcher_config, state)| async {
@@ -682,16 +681,18 @@ pub fn watch_object<K: Resource + Clone + DeserializeOwned + Debug + Send + 'sta
     api: Api<K>,
     name: &str,
 ) -> impl Stream<Item = Result<Option<Arc<K>>>> + Send {
-    watcher(api, Config::default().fields(&format!("metadata.name={name}"))).map(|event| match event? {
-        Event::Deleted(_) => Ok(None),
-        // We're filtering by object name, so getting more than one object means that either:
-        // 1. The apiserver is accepting multiple objects with the same name, or
-        // 2. The apiserver is ignoring our query
-        // In either case, the K8s apiserver is broken and our API will return invalid data, so
-        // we had better bail out ASAP.
-        Event::Restarted(objs) if objs.len() > 1 => Err(Error::TooManyObjects),
-        Event::Restarted(mut objs) => Ok(objs.pop()),
-        Event::Applied(obj) => Ok(Some(obj)),
+    watcher(api, Config::default().fields(&format!("metadata.name={name}"))).map(|event| {
+        match event?.as_ref() {
+            Event::Deleted(_) => Ok(None),
+            // We're filtering by object name, so getting more than one object means that either:
+            // 1. The apiserver is accepting multiple objects with the same name, or
+            // 2. The apiserver is ignoring our query
+            // In either case, the K8s apiserver is broken and our API will return invalid data, so
+            // we had better bail out ASAP.
+            Event::Restarted(objs) if objs.len() > 1 => Err(Error::TooManyObjects),
+            Event::Restarted(objs) => Ok(objs.clone().pop().map(Arc::new)),
+            Event::Applied(obj) => Ok(Some(Arc::new(obj.clone()))),
+        }
     })
 }
 

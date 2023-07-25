@@ -14,9 +14,9 @@ pub struct EventFlatten<St, K> {
     #[pin]
     stream: St,
     emit_deleted: bool,
-    queue: std::vec::IntoIter<Arc<K>>,
+    queue: std::vec::IntoIter<K>,
 }
-impl<St: TryStream<Ok = Event<Arc<K>>>, K> EventFlatten<St, K> {
+impl<St: TryStream<Ok = Arc<Event<K>>>, K> EventFlatten<St, K> {
     pub(super) fn new(stream: St, emit_deleted: bool) -> Self {
         Self {
             stream,
@@ -27,7 +27,8 @@ impl<St: TryStream<Ok = Event<Arc<K>>>, K> EventFlatten<St, K> {
 }
 impl<St, K> Stream for EventFlatten<St, K>
 where
-    St: Stream<Item = Result<Event<Arc<K>>, Error>>,
+    St: Stream<Item = Result<Arc<Event<K>>, Error>>,
+    K: Clone,
 {
     type Item = Result<Arc<K>, Error>;
 
@@ -35,21 +36,23 @@ where
         let mut me = self.project();
         Poll::Ready(loop {
             if let Some(item) = me.queue.next() {
-                break Some(Ok(item));
+                break Some(Ok(item.into()));
             }
             break match ready!(me.stream.as_mut().poll_next(cx)) {
-                Some(Ok(Event::Applied(obj))) => Some(Ok(obj)),
-                Some(Ok(Event::Deleted(obj))) => {
-                    if *me.emit_deleted {
-                        Some(Ok(obj))
-                    } else {
+                Some(Ok(ev)) => match ev.as_ref() {
+                    Event::Applied(obj) => Some(Ok(Arc::new(obj.clone()))),
+                    Event::Deleted(obj) => {
+                        if *me.emit_deleted {
+                            Some(Ok(Arc::new(obj.clone())))
+                        } else {
+                            continue;
+                        }
+                    }
+                    Event::Restarted(objs) => {
+                        *me.queue = objs.clone().into_iter();
                         continue;
                     }
-                }
-                Some(Ok(Event::Restarted(objs))) => {
-                    *me.queue = objs.into_iter();
-                    continue;
-                }
+                },
                 Some(Err(err)) => Some(Err(err)),
                 None => return Poll::Ready(None),
             };
