@@ -8,7 +8,9 @@ use kube::{
     api::{Api, ObjectMeta, Patch, PatchParams, Resource},
     runtime::{
         controller::{Action, Controller},
-        watcher,
+        reflector,
+        utils::{stream_subscribe, StreamSubscribe},
+        watcher, WatchStreamExt,
     },
     Client, CustomResource,
 };
@@ -102,7 +104,12 @@ async fn main() -> Result<()> {
         }
     });
 
-    Controller::new(cmgs, watcher::Config::default())
+    let (reader, writer) = reflector::store();
+    let reflector = reflector(writer, watcher(cmgs, watcher::Config::default()));
+    info!("Store sz: {}", reader.len());
+    let reflector = reflector.stream_subscribe();
+    let sb = s.subscribe();
+    Controller::for_stream(sb, reader.clone())
         .owns(cms, watcher::Config::default())
         .reconcile_all_on(reload_rx.map(|_| ()))
         .shutdown_on_signal()
